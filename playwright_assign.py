@@ -1,199 +1,196 @@
-from playwright.sync_api import sync_playwright
-import pandas as pd
 import json
 import random
-import time
-import os
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import quote
+import pandas as pd
 
-# ================================
-# CONFIGURATION
-# ================================
-CONTACTS_FILE = "contacts.xlsx"
-OUTPUT_DIR = "output"
-MAX_MESSAGES = 3
-LOGIN_TIMEOUT = 120000  # milliseconds
-RANDOM_DELAY_MIN = 1.0   # seconds
-RANDOM_DELAY_MAX = 3.0
+from openpyxl import load_workbook, Workbook
+from playwright.sync_api import sync_playwright, TimeoutError
 
-# Create output folder
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ================================
-# HELPER FUNCTIONS
-# ================================
-def random_delay(min_sec=RANDOM_DELAY_MIN, max_sec=RANDOM_DELAY_MAX):
-    """Sleep for a random time to mimic human behaviour"""
-    time.sleep(random.uniform(min_sec, max_sec))
+BASE_DIR = Path(__file__).parent
+CONTACT_FILE = BASE_DIR / "contacts.xlsx"
+WHATSAPP_URL = "https://web.whatsapp.com"
 
-def read_contacts(file_path):
-    """Read contacts from Excel – expects a column named 'name'"""
-    df = pd.read_excel(file_path)
-    # If your column is called 'Name' or 'Contact', change it here
-    return df['Name'].dropna().tolist()
+today = datetime.now().strftime("%Y-%m-%d")
 
-def save_json(data, filename):
-    with open(os.path.join(OUTPUT_DIR, filename), 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+REPORT_JSON = BASE_DIR / f"whatsapp_report_{today}.json"
+REPORT_EXCEL = BASE_DIR / f"whatsapp_report_{today}.xlsx"
 
-def save_excel(data, filename):
-    df = pd.DataFrame(data)
-    df.to_excel(os.path.join(OUTPUT_DIR, filename), index=False)
+SCREENSHOT_DIR = BASE_DIR / "screenshots"
+SCREENSHOT_DIR.mkdir(exist_ok=True)
 
-# ================================
-# MAIN AUTOMATION
-# ================================
-def main():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
 
-        context = browser.new_context()
-        page = context.new_page()
+def random_delay(page):
+    page.wait_for_timeout(random.randint(2000, 5000))
 
-        #page.wait_for_selector("div[aria-label='Chat list']", timeout=120000)
-        #print("WhatsApp Loaded")
-    
-        # ---- STEP 1: Open WhatsApp Web and login ----
-        print("🌐 Opening WhatsApp Web...")
-        page.goto("https://web.whatsapp.com/")
-        print("🔐 Scan the QR code within 2 minutes...")
+
+def read_contacts():
+    df = pd.read_excel("contacts.xlsx")
+    contacts = []
+    for _, row in df.iterrows():
+        contacts.append({
+            "name": row["name"],
+            "phone": row["phone"],
+            "message": row["message"]
+        })
+    return contacts
+
+
+def extract_last_3_messages(page):
+    try:
+        page.wait_for_timeout(5000)
+
+        message_elements = page.locator("div.copyable-text span.selectable-text")
+        count = message_elements.count()
+
+        print("Total messages found:", count)
+
+        messages = []
+
+        for i in range(count):
+            text = message_elements.nth(i).inner_text().strip()
+            if text:
+                messages.append(text)
+
+        if len(messages) == 0:
+            print("Trying fallback selector...")
+            message_elements = page.locator("span.selectable-text")
+            count = message_elements.count()
+
+            print("Total messages found using fallback:", count)
+
+            for i in range(count):
+                text = message_elements.nth(i).inner_text().strip()
+                if text:
+                    messages.append(text)
+
+        return messages[-3:]
+
+    except Exception as e:
+        print("Error while extracting messages:", e)
+        return []
+
+
+def send_message(page, contact):
+    result = {
+        "name": contact["name"],
+        "phone": contact["phone"],
+        "message": contact["message"],
+        "status": "Failed",
+        "error": "",
+        "screenshot": "",
+        "last_3_messages": []
+    }
+
+    try:
+        print(f"Processing: {contact['name']} - {contact['phone']}")
+
+        phone = contact["phone"].replace("+", "").replace(" ", "")
+        encoded_message = quote(contact["message"])
+
+        chat_url = f"https://web.whatsapp.com/send?phone={phone}&text={encoded_message}"
+
+        page.goto(chat_url)
+        page.wait_for_timeout(8000)
+
         try:
-            page.wait_for_selector("div[aria-label='Chat list']", timeout=LOGIN_TIMEOUT)
+            send_button = page.wait_for_selector("span[data-icon='send']", timeout=10000)
+            send_button.click()
+            print("Message sent using Send button.")
         except Exception:
-            print("❌ Login timeout – did you scan the QR code?")
-            browser.close()
-            return
-        print("✅ WhatsApp loaded successfully!")
+            print("Send button not found, pressing Enter instead...")
+            page.keyboard.press("Enter")
 
-        # ---- STEP 2: Read contacts ----
-        time.sleep(5)
-        contacts = read_contacts(CONTACTS_FILE)
-        print(f"📇 Loaded {len(contacts)} contacts from {CONTACTS_FILE}")
-        if not contacts:
-            print("⚠️ No contacts found. Exiting.")
-            browser.close()
-            return
+        page.wait_for_timeout(7000)
 
-        results = []   # store data for each contact
+        screenshot_path = SCREENSHOT_DIR / f"{contact['name']}_{today}.png"
+        page.screenshot(path=str(screenshot_path), full_page=True)
 
-        # ---- STEP 3: Process each contact ----
-        for contact_name in contacts:
-            print(f"\n🔍 Processing: {contact_name}")
-            result_entry = {
-                "contact": contact_name,
-                "status": "success",
-                "messages": [],
-                "screenshot": None,
-                "error": None
-            }
+        result["status"] = "Sent"
+        result["screenshot"] = str(screenshot_path)
+        result["last_3_messages"] = extract_last_3_messages(page)
 
-            try:
-                # --- 3a. Search for the contact ---
-                # Click the search icon (or use the shortcut)
-                page.click("div[aria-label='Search or start new chat']")
-                random_delay()
+    except TimeoutError:
+        result["error"] = "Unable to open chat or send message."
 
-                # Clear any existing text
-                page.keyboard.press("Control+A")
-                page.keyboard.press("Backspace")
-                random_delay()
+    except Exception as e:
+        result["error"] = str(e)
 
-                # Type the contact name
-                page.fill("div[aria-label='Search or start a new chat']", contact_name)
-                random_delay(2.0, 4.0)  # give search results time
+    return result
 
-                # Find the contact in the list – using title attribute
-                contact_selector = f"span[title='{contact_name}']"
-                if not page.locator(contact_selector).count():
-                    print(f"⚠️ Contact '{contact_name}' not found – skipping")
-                    result_entry["status"] = "not found"
-                    results.append(result_entry)
-                    continue
 
-                # Click on the contact to open the chat
-                page.locator(contact_selector).click()
-                random_delay(2.0, 4.0)
+def save_reports(results):
+    with open(REPORT_JSON, "w", encoding="utf-8") as file:
+        json.dump(results, file, indent=4, ensure_ascii=False)
 
-                # --- 3b. Extract last N messages ---
-                msg_selector = "div[data-testid='msg-container']"
-                # Wait for at least one message to appear
-                page.wait_for_selector(msg_selector, timeout=10000)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "WhatsApp Report"
 
-                # Get all message containers
-                messages_elements = page.locator(msg_selector).all()
-                # Take the last MAX_MESSAGES (or all if fewer)
-                last_messages = messages_elements[-MAX_MESSAGES:]
+    sheet.append([
+        "Name",
+        "Phone",
+        "Message",
+        "Status",
+        "Error",
+        "Screenshot",
+        "Last 3 Messages"
+    ])
 
-                for msg_elem in last_messages:
-                    # Extract text – some messages may be media only
-                    try:
-                        text = msg_elem.locator("span[aria-label*='message']").text_content() or ""
-                    except:
-                        text = "[media or unsupported]"
+    for item in results:
+        sheet.append([
+            item["name"],
+            item["phone"],
+            item["message"],
+            item["status"],
+            item["error"],
+            item["screenshot"],
+            " | ".join(item["last_3_messages"])
+        ])
 
-                    # Determine sender (outgoing = me)
-                    is_outgoing = "msg-outgoing" in (msg_elem.get_attribute("data-testid") or "")
-                    sender = "You" if is_outgoing else "Contact"
+    workbook.save(REPORT_EXCEL)
 
-                    result_entry["messages"].append({
-                        "sender": sender,
-                        "text": text.strip() or "[empty]"
-                    })
 
-                # Reverse to have newest first (optional)
-                result_entry["messages"].reverse()
+def main():
+    if not CONTACT_FILE.exists():
+        print("contacts.xlsx file not found.")
+        print(f"Please create it here: {CONTACT_FILE}")
+        return
 
-                # --- 3c. Take a screenshot of the chat ---
-                safe_name = contact_name.replace(" ", "_")
-                screenshot_path = os.path.join(OUTPUT_DIR, f"{safe_name}.png")
-                page.screenshot(path=screenshot_path)
-                result_entry["screenshot"] = f"{safe_name}.png"
+    contacts = read_contacts()
+    results = []
 
-                print(f"✅ Extracted {len(result_entry['messages'])} messages")
+    with sync_playwright() as p:
+        browser = p.chromium.launch_persistent_context(
+            user_data_dir=str(BASE_DIR / "whatsapp_session"),
+            headless=False
+        )
 
-            except Exception as e:
-                print(f"❌ Error processing {contact_name}: {str(e)}")
-                result_entry["status"] = "error"
-                result_entry["error"] = str(e)
+        page = browser.new_page()
+        page.goto(WHATSAPP_URL)
 
-            results.append(result_entry)
+        print("Scan QR code if required.")
+        print("Waiting for WhatsApp Web to load...")
 
-            # Random pause before next contact
-            random_delay(3.0, 6.0)
+        page.wait_for_selector("div[role='textbox']", timeout=180000)
 
-        # ---- STEP 4: Generate reports ----
-        print("\n📊 Generating reports...")
+        print("WhatsApp Web loaded successfully.")
 
-        # JSON report (full structure)
-        save_json(results, "results.json")
+        for contact in contacts:
+            result = send_message(page, contact)
+            results.append(result)
+            random_delay(page)
 
-        # Excel report (flattened: one row per message)
-        excel_rows = []
-        for res in results:
-            if not res["messages"]:
-                excel_rows.append({
-                    "contact": res["contact"],
-                    "status": res["status"],
-                    "sender": "",
-                    "message": "",
-                    "screenshot": res.get("screenshot", ""),
-                    "error": res.get("error", "")
-                })
-            else:
-                for msg in res["messages"]:
-                    excel_rows.append({
-                        "contact": res["contact"],
-                        "status": res["status"],
-                        "sender": msg["sender"],
-                        "message": msg["text"],
-                        "screenshot": res.get("screenshot", ""),
-                        "error": res.get("error", "")
-                    })
-        save_excel(excel_rows, "results.xlsx")
+        save_reports(results)
 
-        print(f"✅ Reports saved in '{OUTPUT_DIR}' folder")
-        print("🎉 Done! Closing browser...")
+        print("Automation completed.")
+        print(f"JSON Report: {REPORT_JSON}")
+        print(f"Excel Report: {REPORT_EXCEL}")
+
         browser.close()
+
 
 if __name__ == "__main__":
     main()
