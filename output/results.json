@@ -1,0 +1,16 @@
+[
+  {
+    "contact": "Ramesh",
+    "status": "error",
+    "messages": [],
+    "screenshot": null,
+    "error": "Page.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"div[aria-label='Search or start new chat']\")\n"
+  },
+  {
+    "contact": "Wife Priya",
+    "status": "error",
+    "messages": [],
+    "screenshot": null,
+    "error": "Page.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"div[aria-label='Search or start new chat']\")\n"
+  }
+]
