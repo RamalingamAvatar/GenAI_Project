@@ -21,7 +21,7 @@ elif marks.replace(".", "", 1).isdigit():
     elif 0 <= marks < 60:
         grade = "E"
     else:
-        grade = "Invalid Marks, please check.."
+        grade = "Invalid Marks, please check....."
 else:
     grade = "Invalid Input"
 print("Result:", grade)
