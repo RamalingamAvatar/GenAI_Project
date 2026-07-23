@@ -1,196 +1,115 @@
-import json
-import random
+from playwright.async_api import async_playwright
 from datetime import datetime
-from pathlib import Path
-from urllib.parse import quote
 import pandas as pd
+import asyncio
 
-from openpyxl import load_workbook, Workbook
-from playwright.sync_api import sync_playwright, TimeoutError
+print("Starting the Playwright script...")
+print(f"Current date and time: {datetime.now()}")
+start_time = datetime.now()
 
+#Steps to automate:
+#1. Launch the Chromium Browser
+#2. Navigate to https://web.whatsapp.com/
+#3. Read the "contacts.xlsx" and read the Name, Number and Personalized message from the sheet
+#4. Search the contact in the whatsapp web and generate the personalized message for the contact
+#5. Extract the last 3 sent messages in the chat
+#6. Save it in a JSON and excel file for all the contacts read from the excel sheet
 
-BASE_DIR = Path(__file__).parent
-CONTACT_FILE = BASE_DIR / "contacts.xlsx"
-WHATSAPP_URL = "https://web.whatsapp.com"
-
-today = datetime.now().strftime("%Y-%m-%d")
-
-REPORT_JSON = BASE_DIR / f"whatsapp_report_{today}.json"
-REPORT_EXCEL = BASE_DIR / f"whatsapp_report_{today}.xlsx"
-
-SCREENSHOT_DIR = BASE_DIR / "screenshots"
-SCREENSHOT_DIR.mkdir(exist_ok=True)
-
-
-def random_delay(page):
-    page.wait_for_timeout(random.randint(2000, 5000))
-
-
-def read_contacts():
-    df = pd.read_excel("contacts.xlsx")
-    contacts = []
-    for _, row in df.iterrows():
-        contacts.append({
-            "name": row["name"],
-            "phone": row["phone"],
-            "message": row["message"]
-        })
-    return contacts
-
-
-def extract_last_3_messages(page):
-    try:
-        page.wait_for_timeout(5000)
-
-        message_elements = page.locator("div.copyable-text span.selectable-text")
-        count = message_elements.count()
-
-        print("Total messages found:", count)
-
-        messages = []
-
-        for i in range(count):
-            text = message_elements.nth(i).inner_text().strip()
-            if text:
-                messages.append(text)
-
-        if len(messages) == 0:
-            print("Trying fallback selector...")
-            message_elements = page.locator("span.selectable-text")
-            count = message_elements.count()
-
-            print("Total messages found using fallback:", count)
-
-            for i in range(count):
-                text = message_elements.nth(i).inner_text().strip()
-                if text:
-                    messages.append(text)
-
-        return messages[-3:]
-
-    except Exception as e:
-        print("Error while extracting messages:", e)
-        return []
-
-
-def send_message(page, contact):
-    result = {
-        "name": contact["name"],
-        "phone": contact["phone"],
-        "message": contact["message"],
-        "status": "Failed",
-        "error": "",
-        "screenshot": "",
-        "last_3_messages": []
-    }
-
-    try:
-        print(f"Processing: {contact['name']} - {contact['phone']}")
-
-        phone = contact["phone"].replace("+", "").replace(" ", "")
-        encoded_message = quote(contact["message"])
-
-        chat_url = f"https://web.whatsapp.com/send?phone={phone}&text={encoded_message}"
-
-        page.goto(chat_url)
-        page.wait_for_timeout(8000)
-
-        try:
-            send_button = page.wait_for_selector("span[data-icon='send']", timeout=10000)
-            send_button.click()
-            print("Message sent using Send button.")
-        except Exception:
-            print("Send button not found, pressing Enter instead...")
-            page.keyboard.press("Enter")
-
-        page.wait_for_timeout(7000)
-
-        screenshot_path = SCREENSHOT_DIR / f"{contact['name']}_{today}.png"
-        page.screenshot(path=str(screenshot_path), full_page=True)
-
-        result["status"] = "Sent"
-        result["screenshot"] = str(screenshot_path)
-        result["last_3_messages"] = extract_last_3_messages(page)
-
-    except TimeoutError:
-        result["error"] = "Unable to open chat or send message."
-
-    except Exception as e:
-        result["error"] = str(e)
-
-    return result
-
-
-def save_reports(results):
-    with open(REPORT_JSON, "w", encoding="utf-8") as file:
-        json.dump(results, file, indent=4, ensure_ascii=False)
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "WhatsApp Report"
-
-    sheet.append([
-        "Name",
-        "Phone",
-        "Message",
-        "Status",
-        "Error",
-        "Screenshot",
-        "Last 3 Messages"
-    ])
-
-    for item in results:
-        sheet.append([
-            item["name"],
-            item["phone"],
-            item["message"],
-            item["status"],
-            item["error"],
-            item["screenshot"],
-            " | ".join(item["last_3_messages"])
-        ])
-
-    workbook.save(REPORT_EXCEL)
-
-
-def main():
-    if not CONTACT_FILE.exists():
-        print("contacts.xlsx file not found.")
-        print(f"Please create it here: {CONTACT_FILE}")
-        return
-
-    contacts = read_contacts()
-    results = []
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
-            user_data_dir=str(BASE_DIR / "whatsapp_session"),
-            headless=False
+async def get_last_three_messages():
+    async with async_playwright() as p:
+        user_data_dir = "./whatsapp_session"
+        browser = await p.chromium.launch_persistent_context(
+            user_data_dir,
+            headless = False,
+            args = ["--start-maximized"]
         )
+        print("Launching the Chromium browser...")
+        page = browser.pages[0]
 
-        page = browser.new_page()
-        page.goto(WHATSAPP_URL)
+        print("Navigating to WhatsApp Web...")
+        await page.goto("https://web.whatsapp.com/")
 
-        print("Scan QR code if required.")
-        print("Waiting for WhatsApp Web to load...")
+         # Wait for the chat application to load fully
+        print("Waiting for chat list to load (Scan QR code if prompted)...")
+        await page.wait_for_selector("div[data-testid='chat-list']", timeout=60000)
 
-        page.wait_for_selector("div[role='textbox']", timeout=180000)
+        #Read the contacts from the excel sheet and send the personalized message to each contact
+        contacts_df = pd.read_excel("contacts.xlsx")
+        messages_data = {}
+        for index, row in contacts_df.iterrows():
+            contact_name = row['Name']
+            contact_number = row['Number']
+            personalized_message = row['Message']
 
-        print("WhatsApp Web loaded successfully.")
+            
+            print(f"Searching for contact: {contact_name} ({contact_number})")
+            search_box = page.get_by_placeholder("Search or start a new chat")
+            await search_box.fill(contact_name)
+            await page.wait_for_timeout(2000)  # Wait for the search results to load
 
-        for contact in contacts:
-            result = send_message(page, contact)
-            results.append(result)
-            random_delay(page)
+            # Click on the contact from the search results
+            #contact_locator = page.locator(f"span[title='{contact_name}']")
+            contact_locator = page.locator(f"(//*[contains(text(),'{contact_name}')])[1]")
+            if await contact_locator.count() > 0:
+                await contact_locator.first.click()
+                print(f"Contact {contact_name} found. Sending message...")
+                message_box = page.locator("div[contenteditable='true']").last
+                await message_box.fill(personalized_message)
+                await message_box.press("Enter")
+                await page.wait_for_timeout(20000)
+                print(f"Message sent to {contact_name}.")
+            else:
+                print(f"Contact {contact_name} not found.")
 
-        save_reports(results)
+            print(f"Opening chat with: {contact_name}")
 
-        print("Automation completed.")
-        print(f"JSON Report: {REPORT_JSON}")
-        print(f"Excel Report: {REPORT_EXCEL}")
+            chat_selector = f"span[title='{contact_name}']"
+            await page.wait_for_selector(chat_selector)
+            await page.click(chat_selector)
 
-        browser.close()
+            # Wait briefly for the chat window content to render
+            await page.wait_for_timeout(3000)
 
+            # WhatsApp stores actual text bubbles inside 'span.copyable-text > span'
+            message_selector = "span.copyable-text > span"
+            await page.wait_for_selector(message_selector)
 
-if __name__ == "__main__":
-    main()
+             # Fetch all available visible message elements in the open pane
+            message_elements = await page.locator(message_selector).all()
+
+            # Grab the text content of the last 3 elements
+            last_three_elements = message_elements[-3:]
+            text_data = []
+            for i, locator in enumerate(last_three_elements, 1):
+                # Use await to resolve the text from each locator object
+                text = await locator.text_content()
+                text_data.append(text)
+
+            #Save the message with name in JSON and Excel file
+            messages_data[contact_name] = {
+                "Name": contact_name,
+                "Number": contact_number,
+                "Last_3_Messages": text_data
+            }
+
+        date_now = datetime.now().strftime("%Y-%m-%d")
+        file_name = f'whatsapp_report_{date_now}'
+
+        # Save the messages data to a JSON file
+        messages_df = pd.DataFrame.from_dict(messages_data, orient='index')
+        messages_df.to_json(f"{file_name}.json", orient='index', indent=4)
+
+        #Update Excel file with the last 3 messages
+        messages_df.to_excel(f"{file_name}.xlsx", index=False)
+
+        # Keep the session alive briefly before closing
+        await page.wait_for_timeout(2000)
+        await browser.close()
+
+asyncio.run(get_last_three_messages())
+
+print("Playwright script completed successfully.")
+print(f"Current date and time: {datetime.now()}")
+end_time = datetime.now()
+run_time = end_time - start_time
+print(f"Total time taken for the script to run: {run_time}")

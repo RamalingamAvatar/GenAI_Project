@@ -1,0 +1,28 @@
+2026/07/23-07:46:14.586 7f1c Reusing MANIFEST C:\Automation\GenAI Course\playwright-whatsapp-bot\whatsapp_session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/07/23-07:46:14.586 7f1c Recovering log #646
+2026/07/23-07:46:14.606 7f1c Reusing old log C:\Automation\GenAI Course\playwright-whatsapp-bot\whatsapp_session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000646.log 
+2026/07/23-07:46:50.477 68bc Level-0 table #659: started
+2026/07/23-07:46:50.503 68bc Level-0 table #659: 1303885 bytes OK
+2026/07/23-07:46:50.505 68bc Delete type=0 #646
+2026/07/23-07:47:21.482 68bc Compacting 1@1 + 9@2 files
+2026/07/23-07:47:21.561 68bc Generated table #660@1: 57682 keys, 2250402 bytes
+2026/07/23-07:47:21.627 68bc Generated table #661@1: 38136 keys, 2191437 bytes
+2026/07/23-07:47:21.701 68bc Generated table #662@1: 68804 keys, 2237378 bytes
+2026/07/23-07:47:21.767 68bc Generated table #663@1: 45933 keys, 2213126 bytes
+2026/07/23-07:47:21.795 68bc Generated table #664@1: 6245 keys, 2148855 bytes
+2026/07/23-07:47:21.863 68bc Generated table #665@1: 24867 keys, 2206395 bytes
+2026/07/23-07:47:21.909 68bc Generated table #666@1: 24686 keys, 2189208 bytes
+2026/07/23-07:47:21.973 68bc Generated table #667@1: 69559 keys, 2210027 bytes
+2026/07/23-07:47:21.989 68bc Generated table #668@1: 12582 keys, 602749 bytes
+2026/07/23-07:47:21.990 68bc Compacted 1@1 + 9@2 files => 18249577 bytes
+2026/07/23-07:47:21.991 68bc compacted to: files[ 0 0 9 0 0 0 0 ]
+2026/07/23-07:47:21.991 68bc Delete type=2 #648
+2026/07/23-07:47:21.991 68bc Delete type=2 #649
+2026/07/23-07:47:21.991 68bc Delete type=2 #650
+2026/07/23-07:47:21.991 68bc Delete type=2 #651
+2026/07/23-07:47:21.992 68bc Delete type=2 #652
+2026/07/23-07:47:21.992 68bc Delete type=2 #653
+2026/07/23-07:47:21.992 68bc Delete type=2 #654
+2026/07/23-07:47:21.992 68bc Delete type=2 #655
+2026/07/23-07:47:21.992 68bc Delete type=2 #656
+2026/07/23-07:47:21.992 68bc Delete type=2 #659
